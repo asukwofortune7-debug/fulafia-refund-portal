@@ -1,0 +1,183 @@
+<?php
+/**
+ * config.php
+ * Central configuration: database connection, session bootstrap,
+ * and shared constants. Every page includes this file first.
+ */
+
+// ---- Error reporting (turn display_errors OFF in production) --------
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// ---- Session (hardened) -------------------------------------------------
+// These flags must be set BEFORE session_start(). They stop JavaScript
+// from reading the session cookie (mitigates XSS-driven theft), stop it
+// being sent over plain HTTP once you're on HTTPS, and stop the browser
+// attaching it to cross-site requests.
+if (session_status() === PHP_SESSION_NONE) {
+    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+
+    ini_set('session.use_strict_mode', '1');
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path'     => '/',
+        'domain'   => '',
+        'secure'   => $isHttps,   // only send the cookie over HTTPS once you're live on it
+        'httponly' => true,       // JavaScript can never read this cookie
+        'samesite' => 'Lax',
+    ]);
+    session_start();
+}
+
+// ---- Database credentials ---------------------------------------------
+// Hardcoded for local development on KSWEB (Android). Every other file
+// in this project reaches the database ONLY through this single block --
+// they all start with `require_once config.php`, which hands them the
+// shared $pdo connection built below. That means these four values are
+// the one and only place your DB credentials live; every admin page,
+// student page, and processing script (login.php, dashboard.php,
+// admin/*.php, etc.) automatically uses exactly what's set here.
+define('DB_HOST', '127.0.0.1');
+define('DB_NAME', 'fulafia_nelfund');
+define('DB_USER', 'root');
+define('DB_PASS', '');
+
+// ---- Site settings ------------------------------------------------------
+define('SITE_NAME', 'FULAFIA NELFUND Refund Portal');
+// IMPORTANT: every in-app navigation link (nav bar, buttons, redirects)
+// is now RELATIVE, not built from this constant -- so it doesn't matter
+// if this doesn't exactly match your host/port, the site will still
+// browse correctly. BASE_URL is only used for links that must be a full
+// URL because they're read outside the browser (the password-reset link
+// sent by email, the link in the status-change notification email).
+// Include your actual port here (KSWEB was using :8000) so those two
+// emails link back to the right place once you get mail() working:
+define('BASE_URL', 'http://127.0.0.1:8000/fulafia-nelfund'); // no trailing slash
+define('UPLOAD_DIR', __DIR__ . '/uploads/');       // filesystem path
+define('UPLOAD_URL', BASE_URL . '/uploads/');       // browser-facing path (unused internally -- pages already link uploads/ relatively)
+define('MAX_UPLOAD_BYTES', 5 * 1024 * 1024);        // 5MB
+define('ALLOWED_IMAGE_TYPES', ['image/png', 'image/jpeg']);       // real MIME, verified via getimagesize()
+define('ALLOWED_IMAGE_EXTENSIONS', ['png', 'jpg', 'jpeg']);         // filename extension, checked separately
+
+// ---- Mail settings (used by forgot_password.php) ------------------------
+// Simple PHP mail() is used here. On most cPanel hosts this works out of
+// the box because the mail server lives on the same box. If your host
+// requires SMTP auth, swap sendResetEmail() below for PHPMailer.
+define('MAIL_FROM_ADDRESS', 'no-reply@fulafia.local'); // update once you're on your real domain
+define('MAIL_FROM_NAME', 'FULAFIA NELFUND Portal');
+
+/**
+ * Notifies a student by email that their refund status has changed.
+ * Uses PHP's built-in mail() -- same approach as the password reset
+ * email. Called from admin/update_status.php right after the DB update.
+ * Never let a mail failure block the status update itself, so this
+ * returns a bool for logging/telemetry rather than throwing.
+ */
+function sendStatusUpdateEmail(string $toEmail, string $toName, string $status): bool
+{
+    $statusMessages = [
+        'Pending'  => 'is now marked as Pending Review. The department will get back to you shortly.',
+        'Approved' => 'has been Approved. Please contact the Bursary/Department for disbursement details.',
+        'Rejected' => 'was Rejected. Please log in to the portal and re-submit a clear screenshot of your NELFUND balance.',
+    ];
+    $detail = $statusMessages[$status] ?? ('has been updated to "' . $status . '".');
+
+    $subject = 'NELFUND Refund Status Update - ' . SITE_NAME;
+    $message = "Hello {$toName},\r\n\r\n"
+        . "Your NELFUND refund request {$detail}\r\n\r\n"
+        . "View your dashboard: " . BASE_URL . "/dashboard.php\r\n\r\n"
+        . "- " . SITE_NAME;
+
+    $headers = "From: " . MAIL_FROM_NAME . " <" . MAIL_FROM_ADDRESS . ">\r\n"
+        . "Reply-To: " . MAIL_FROM_ADDRESS . "\r\n"
+        . "Content-Type: text/plain; charset=UTF-8\r\n";
+
+    return @mail($toEmail, $subject, $message, $headers);
+}
+
+// ---- PDO connection -------------------------------------------------------
+try {
+    $pdo = new PDO(
+        'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
+        DB_USER,
+        DB_PASS,
+        [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES   => false,
+        ]
+    );
+} catch (PDOException $e) {
+    die('Database connection failed. Please contact the site administrator.');
+}
+
+// ---- Small helpers --------------------------------------------------------
+
+/** Escape output for safe HTML display. */
+function e(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+/** Redirect helper. */
+function redirect(string $path): never
+{
+    header('Location: ' . $path);
+    exit;
+}
+
+/** Require an active student session or bounce to login. */
+function requireStudentLogin(): void
+{
+    if (empty($_SESSION['student_id'])) {
+        redirect('login.php');
+    }
+}
+
+/** Require an active admin session or bounce to admin login. */
+function requireAdminLogin(): void
+{
+    if (empty($_SESSION['admin_id'])) {
+        redirect('login.php');
+    }
+}
+
+/** Require an active admin session AND the SuperAdmin role, or bounce to the dashboard. */
+function requireSuperAdminLogin(): void
+{
+    requireAdminLogin();
+    if (($_SESSION['admin_role'] ?? '') !== 'SuperAdmin') {
+        $_SESSION['flash_error'] = 'That section is restricted to SuperAdmins.';
+        redirect('dashboard.php');
+    }
+}
+
+/**
+ * Records a row in audit_logs. Call this immediately after any
+ * critical admin action: login, student status change, or
+ * SuperAdmin create/delete of another admin account.
+ */
+function logActivity(PDO $pdo, ?int $adminId, string $adminName, string $action, ?string $matric = null): void
+{
+    $stmt = $pdo->prepare(
+        'INSERT INTO audit_logs (admin_id, admin_name, action_performed, affected_student_matric)
+         VALUES (?, ?, ?, ?)'
+    );
+    $stmt->execute([$adminId, $adminName, $action, $matric]);
+}
+
+/** Generate/validate a CSRF token for forms. */
+function csrfToken(): string
+{
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+function csrfCheck(): bool
+{
+    return isset($_POST['csrf_token'], $_SESSION['csrf_token'])
+        && hash_equals($_SESSION['csrf_token'], $_POST['csrf_token']);
+}

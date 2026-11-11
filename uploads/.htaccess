@@ -1,0 +1,7 @@
+# Prevent any script execution inside the uploads folder.
+# Uploaded files must only ever be served as static images.
+<FilesMatch "\.(php|phtml|php3|php4|php5|php7|pht|phar)$">
+    Require all denied
+</FilesMatch>
+
+Options -Indexes
