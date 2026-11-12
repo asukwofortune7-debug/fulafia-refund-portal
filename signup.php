@@ -5,8 +5,39 @@ if (!empty($_SESSION['student_id'])) {
     redirect('dashboard.php');
 }
 
+// Traditional Nigerian commercial banks ONLY (no fintechs / microfinance banks).
+// This one list drives both the dropdown below and the server-side
+// whitelist check, so a tampered POST value can never be saved.
+$banks = [
+    'Access Bank',
+    'Citibank Nigeria',
+    'Ecobank Nigeria',
+    'Fidelity Bank',
+    'First Bank of Nigeria',
+    'First City Monument Bank (FCMB)',
+    'Globus Bank',
+    'Guaranty Trust Bank (GTBank)',
+    'Keystone Bank',
+    'Optimus Bank',
+    'Parallex Bank',
+    'Polaris Bank',
+    'PremiumTrust Bank',
+    'Providus Bank',
+    'Signature Bank',
+    'Stanbic IBTC Bank',
+    'Standard Chartered Bank',
+    'Sterling Bank',
+    'SunTrust Bank',
+    'Titan Trust Bank',
+    'Union Bank of Nigeria',
+    'United Bank for Africa (UBA)',
+    'Unity Bank',
+    'Wema Bank',
+    'Zenith Bank',
+];
+
 $errors = [];
-$old = ['full_name' => '', 'matric_number' => '', 'email' => '', 'account_number' => ''];
+$old = ['full_name' => '', 'matric_number' => '', 'email' => '', 'bank_name' => '', 'account_number' => ''];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrfCheck()) {
@@ -15,6 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $old['full_name']      = trim($_POST['full_name'] ?? '');
         $old['matric_number']  = trim($_POST['matric_number'] ?? '');
         $old['email']          = trim($_POST['email'] ?? '');
+        $old['bank_name']      = trim($_POST['bank_name'] ?? '');
         $old['account_number'] = trim($_POST['account_number'] ?? '');
         $password              = $_POST['password'] ?? '';
         $confirmPassword       = $_POST['confirm_password'] ?? '';
@@ -27,6 +59,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (!filter_var($old['email'], FILTER_VALIDATE_EMAIL)) {
             $errors[] = 'Please enter a valid email address.';
+        }
+        if (!in_array($old['bank_name'], $banks, true)) {
+            $errors[] = 'Please select your bank from the list.';
         }
         if (!preg_match('/^\d{10}$/', $old['account_number'])) {
             $errors[] = 'Account number must be exactly 10 digits.';
@@ -61,14 +96,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (empty($errors)) {
             try {
                 $hash = password_hash($password, PASSWORD_DEFAULT);
+                // wallet_balance (0.00) and refund_status ('Pending') are
+                // filled in by the column defaults.
                 $stmt = $pdo->prepare(
-                    'INSERT INTO students (matric_number, full_name, email, account_number, password)
-                     VALUES (?, ?, ?, ?, ?)'
+                    'INSERT INTO students (matric_number, full_name, email, bank_name, account_number, password)
+                     VALUES (?, ?, ?, ?, ?, ?)'
                 );
                 $stmt->execute([
                     $old['matric_number'],
                     $old['full_name'],
                     $old['email'],
+                    $old['bank_name'],
                     $old['account_number'],
                     $hash,
                 ]);
@@ -130,6 +168,18 @@ require __DIR__ . '/includes/header.php';
         <label class="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
         <input type="email" name="email" required value="<?= e($old['email']) ?>"
                class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 transition focus:ring-2 focus:ring-fulafia-emerald focus:border-fulafia-emerald focus:outline-none">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1">Bank Name</label>
+        <select name="bank_name" required
+                class="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2.5 transition focus:ring-2 focus:ring-fulafia-emerald focus:border-fulafia-emerald focus:outline-none">
+          <option value="">Select your bank</option>
+          <?php foreach ($banks as $bank): ?>
+            <option value="<?= e($bank) ?>" <?= $old['bank_name'] === $bank ? 'selected' : '' ?>><?= e($bank) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <p class="text-xs text-slate-400 mt-1">Commercial banks only &mdash; fintech and microfinance accounts are not supported.</p>
       </div>
 
       <div>

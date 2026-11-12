@@ -2,6 +2,65 @@
 require_once __DIR__ . '/../config.php';
 requireAdminLogin();
 
+// ---- Handle wallet balance update (POST) ---------------------------------
+// The refund status dropdown still posts to update_status.php exactly as
+// before. Only the new wallet editor posts back to this page, and it always
+// ends in a redirect so a refresh never re-submits the form.
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $returnUrl = 'dashboard.php' . (($_SERVER['QUERY_STRING'] ?? '') !== '' ? '?' . $_SERVER['QUERY_STRING'] : '');
+
+    if (!csrfCheck()) {
+        $_SESSION['flash_error'] = 'Your session expired. Please try again.';
+    } else {
+        $studentId = (int)($_POST['student_id'] ?? 0);
+        $rawWallet = trim($_POST['wallet_balance'] ?? '');
+
+        if ($studentId <= 0) {
+            $_SESSION['flash_error'] = 'Invalid request. Please try again.';
+        } elseif (!preg_match('/^\d{1,8}(\.\d{1,2})?$/', $rawWallet)) {
+            $_SESSION['flash_error'] = 'Wallet balance must be a positive amount with up to 2 decimal places (e.g. 150000 or 150000.50).';
+        } else {
+            $lookup = $pdo->prepare('SELECT matric_number, full_name FROM students WHERE id = ?');
+            $lookup->execute([$studentId]);
+            $target = $lookup->fetch();
+
+            if (!$target) {
+                $_SESSION['flash_error'] = 'That student no longer exists.';
+            } else {
+                try {
+                    $update = $pdo->prepare('UPDATE students SET wallet_balance = ? WHERE id = ?');
+                    $update->execute([$rawWallet, $studentId]);
+
+                    $adminName = $_SESSION['admin_name'] ?? $_SESSION['admin_email'];
+
+                    logActivity(
+                        $pdo,
+                        $_SESSION['admin_id'],
+                        $adminName,
+                        sprintf(
+                            'Admin %s set Matric [%s] wallet balance to NGN %s',
+                            $adminName,
+                            $target['matric_number'],
+                            number_format((float)$rawWallet, 2)
+                        ),
+                        $target['matric_number']
+                    );
+
+                    $_SESSION['flash_success'] = sprintf(
+                        '%s wallet balance updated to NGN %s.',
+                        $target['full_name'],
+                        number_format((float)$rawWallet, 2)
+                    );
+                } catch (PDOException $ex) {
+                    $_SESSION['flash_error'] = 'Could not save the wallet balance. Has the ALTER TABLE for wallet_balance been run?';
+                }
+            }
+        }
+    }
+
+    redirect($returnUrl);
+}
+
 $flashSuccess = $_SESSION['flash_success'] ?? null;
 unset($_SESSION['flash_success']);
 
@@ -126,22 +185,37 @@ require __DIR__ . '/../includes/header.php';
           <th class="px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">Name</th>
           <th class="px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">Matric No.</th>
           <th class="px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">Email</th>
+          <th class="px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">Bank</th>
           <th class="px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">Account No.</th>
           <th class="px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">Evidence</th>
           <th class="px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">Status</th>
+          <th class="px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">Wallet (&#8358;)</th>
+          <th class="px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">Payout</th>
           <th class="px-4 py-3 font-semibold text-slate-500 text-xs uppercase tracking-wider">Update</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
         <?php if (empty($students)): ?>
-          <tr><td colspan="7" class="px-4 py-10 text-center text-slate-400">No students found.</td></tr>
+          <tr><td colspan="10" class="px-4 py-10 text-center text-slate-400">No students found.</td></tr>
         <?php endif; ?>
 
         <?php foreach ($students as $i => $s): ?>
+          <?php
+            $bankName = trim((string)($s['bank_name'] ?? ''));
+            $wallet   = (float)($s['wallet_balance'] ?? 0);
+            // Exactly what gets copied for the bursary portal:
+            $payout = implode(' | ', [
+                $s['full_name'],
+                $s['matric_number'],
+                $bankName !== '' ? $bankName : 'N/A',
+                $s['account_number'],
+            ]);
+          ?>
           <tr class="<?= $i % 2 === 0 ? 'bg-white' : 'bg-slate-50/60' ?> hover:bg-emerald-50/50 transition">
             <td class="px-4 py-3 font-medium text-slate-800"><?= e($s['full_name']) ?></td>
             <td class="px-4 py-3 text-slate-600 font-mono text-xs"><?= e($s['matric_number']) ?></td>
             <td class="px-4 py-3 text-slate-600"><?= e($s['email']) ?></td>
+            <td class="px-4 py-3 text-slate-600"><?= $bankName !== '' ? e($bankName) : '<span class="text-slate-400">&mdash;</span>' ?></td>
             <td class="px-4 py-3 text-slate-600 font-mono text-xs"><?= e($s['account_number']) ?></td>
             <td class="px-4 py-3">
               <?php if (!empty($s['nelfund_balance_img'])): ?>
@@ -158,6 +232,29 @@ require __DIR__ . '/../includes/header.php';
               <span class="px-2.5 py-1 rounded-full text-xs font-semibold <?= $statusColors[$s['refund_status']] ?>">
                 <?= e($s['refund_status']) ?>
               </span>
+            </td>
+            <td class="px-4 py-3">
+              <form method="POST" class="flex items-center gap-1.5">
+                <input type="hidden" name="csrf_token" value="<?= e(csrfToken()) ?>">
+                <input type="hidden" name="student_id" value="<?= (int)$s['id'] ?>">
+                <span class="text-slate-500 text-xs">&#8358;</span>
+                <input type="number" name="wallet_balance" required min="0" max="99999999.99" step="0.01" inputmode="decimal"
+                       value="<?= e(number_format($wallet, 2, '.', '')) ?>" title="Wallet balance (NGN)"
+                       class="w-28 bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs transition focus:ring-2 focus:ring-fulafia-emerald focus:outline-none">
+                <button type="submit"
+                        class="bg-fulafia-emerald hover:bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">
+                  Save
+                </button>
+              </form>
+            </td>
+            <td class="px-4 py-3">
+              <button type="button"
+                      data-payout="<?= e($payout) ?>"
+                      data-name="<?= e($s['full_name']) ?>"
+                      onclick="copyPayout(this)"
+                      class="bg-white border border-slate-300 hover:border-fulafia-emerald hover:text-fulafia-forest text-slate-600 text-xs font-semibold px-3 py-1.5 rounded-lg transition whitespace-nowrap">
+                &#128203; Copy Payout Info
+              </button>
             </td>
             <td class="px-4 py-3">
               <form method="POST" action="update_status.php" class="flex items-center gap-2">
@@ -195,6 +292,10 @@ require __DIR__ . '/../includes/header.php';
   </div>
 </div>
 
+<!-- Copy confirmation toast -->
+<div id="toast" role="status" aria-live="polite"
+     class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] max-w-[90vw] px-4 py-2.5 rounded-xl text-sm font-medium text-white shadow-2xl bg-fulafia-forest opacity-0 pointer-events-none transition-opacity duration-200"></div>
+
 <script>
 function openLightbox(src, name) {
   document.getElementById('lightbox-img').src = src;
@@ -208,6 +309,50 @@ function closeLightbox(e) {
     const lb = document.getElementById('lightbox');
     lb.classList.add('hidden');
     lb.classList.remove('flex');
+  }
+}
+
+let toastTimer;
+function showToast(message, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = message;
+  t.classList.toggle('bg-fulafia-forest', !isError);
+  t.classList.toggle('bg-red-600', !!isError);
+  t.classList.remove('opacity-0');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.classList.add('opacity-0'); }, 2400);
+}
+
+// Copies "Full Name | Matric Number | Bank Name | Account Number".
+function copyPayout(btn) {
+  const text = btn.dataset.payout;
+  const name = btn.dataset.name;
+  // navigator.clipboard only works on HTTPS or 127.0.0.1/localhost, so
+  // fall back to the older method on plain-HTTP addresses.
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(
+      function () { showToast('Payout info copied for ' + name); },
+      function () { fallbackCopy(text, name); }
+    );
+  } else {
+    fallbackCopy(text, name);
+  }
+}
+function fallbackCopy(text, name) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+  document.body.removeChild(ta);
+  if (ok) {
+    showToast('Payout info copied for ' + name);
+  } else {
+    showToast('Copy failed. Please copy the details manually.', true);
   }
 }
 </script>
