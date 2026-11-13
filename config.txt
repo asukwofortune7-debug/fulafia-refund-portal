@@ -38,9 +38,9 @@ if (session_status() === PHP_SESSION_NONE) {
 // the one and only place your DB credentials live; every admin page,
 // student page, and processing script (login.php, dashboard.php,
 // admin/*.php, etc.) automatically uses exactly what's set here.
-define('DB_HOST', '127.0.0.1');
-define('DB_NAME', 'fulafia_nelfund');
-define('DB_USER', 'root');
+define('DB_HOST', 'sql110.infinityfree.com');
+define('DB_NAME', 'if0_43427530_fulafia_nelfund');
+define('DB_USER', 'if0_43427530');
 define('DB_PASS', '');
 
 // ---- Site settings ------------------------------------------------------
@@ -53,7 +53,7 @@ define('SITE_NAME', 'FULAFIA NELFUND Refund Portal');
 // sent by email, the link in the status-change notification email).
 // Include your actual port here (KSWEB was using :8000) so those two
 // emails link back to the right place once you get mail() working:
-define('BASE_URL', 'http://127.0.0.1:8000/fulafia-nelfund'); // no trailing slash
+define('BASE_URL', 'https://fulafia-refund.kesug.com'); // no trailing slash
 define('UPLOAD_DIR', __DIR__ . '/uploads/');       // filesystem path
 define('UPLOAD_URL', BASE_URL . '/uploads/');       // browser-facing path (unused internally -- pages already link uploads/ relatively)
 define('MAX_UPLOAD_BYTES', 5 * 1024 * 1024);        // 5MB
@@ -180,4 +180,6 @@ function csrfCheck(): bool
 {
     return isset($_POST['csrf_token'], $_SESSION['csrf_token'])
         && hash_equals($_SESSION['csrf_token'], $_POST['csrf_token']);
+}
+token']);
 }

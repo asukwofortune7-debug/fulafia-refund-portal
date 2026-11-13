@@ -3,9 +3,6 @@
 -- Run this once in phpMyAdmin (or `mysql -u user -p dbname < schema.sql`)
 -- =====================================================================
 
-CREATE DATABASE IF NOT EXISTS fulafia_nelfund CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE fulafia_nelfund;
-
 -- ---------------------------------------------------------------------
 -- Students
 -- ---------------------------------------------------------------------
@@ -83,5 +80,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 --     action_performed TEXT,
 --     affected_student_matric VARCHAR(50),
 --     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+--     FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
+-- ) ENGINE=InnoDB;
+DEFAULT CURRENT_TIMESTAMP,
 --     FOREIGN KEY (admin_id) REFERENCES admins(id) ON DELETE SET NULL
 -- ) ENGINE=InnoDB;
