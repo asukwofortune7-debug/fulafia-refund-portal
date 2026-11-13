@@ -2,7 +2,7 @@
 
 A secure, centralized web application built to streamline tuition refund verification and disbursement tracking for Federal University of Lafia (FULAFIA) students following institutional NELFUND releases.
 
-🔗 **Live Demo:** [https://kesug.com](https://kesug.com)
+🔗 **Live Demo:** [https://fulafia-refund.kesug.com](https://fulafia-refund.kesug.com)
 
 ---
 ## 🎯 Problem Statement
